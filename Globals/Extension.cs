@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 namespace DotNETWork.Globals
 {
+    // SOURCE: http://stackoverflow.com/a/30435601
     public static class Extension
     {
         public static byte[] Serialize(this object _object)
