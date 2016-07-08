@@ -13,6 +13,7 @@ using System.Diagnostics;
 
 using System.IO;
 using DotNETWork.Globals;
+using DotNETWork.Security;
 namespace DotNETWork.Tcp
 {
     public class DotTcpServer<T> where T : IClient, new()
@@ -25,12 +26,16 @@ namespace DotNETWork.Tcp
         private TcpListener tcpListener;
         private Thread listenerThread;
 
+        public DotRijndaelDecryption RijndaelDecryption;
+
         public DotTcpServer(int portNumber)
         {
             LocalIPEndPoint = new IPEndPoint(Utilities.GetLocalIPv4(), portNumber);
             tcpListener = new TcpListener(LocalIPEndPoint);
 
             ClientList = new List<T>();
+
+            RijndaelDecryption = new DotRijndaelDecryption();
         }
 
         public void Run()
@@ -54,10 +59,13 @@ namespace DotNETWork.Tcp
                     new Thread(new ParameterizedThreadStart((object @object) =>
                     {
                         T threadClient = (T)@object;
+                        
+                        RijndaelDecryption.SendPublicKeyXML(threadClient.BinWriter);
 
                         while (threadClient.TcpClient.Connected)
                         {
                             threadClient.Call((object)this);
+                            new ManualResetEvent(false).WaitOne(1);
                         }
 
                     })).Start((object)ClientList[ClientList.Count - 1]);

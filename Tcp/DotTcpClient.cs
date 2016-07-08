@@ -13,6 +13,7 @@ using System.Diagnostics;
 
 using System.IO;
 using DotNETWork.Globals;
+using DotNETWork.Security;
 
 namespace DotNETWork.Tcp
 {
@@ -25,6 +26,8 @@ namespace DotNETWork.Tcp
 
         private BinaryReader binReader;
         private BinaryWriter binWriter;
+
+        private DotRijndaelEncryption rjindaelEncryption;
 
         public DotTcpClient(string remoteIp, int remotePort)
         {
@@ -50,20 +53,27 @@ namespace DotNETWork.Tcp
             binReader = new BinaryReader(tcpClient.GetStream());
             binWriter = new BinaryWriter(tcpClient.GetStream());
 
+            // TRY TO GET PUBLIC KEY
+            // AND INSTANCIATE RIJNADELENCRYPTION
+            string inputXML = Receive();
+            rjindaelEncryption = new DotRijndaelEncryption(inputXML, binWriter);
+
+
             return true;
         }
         public bool Send(object inputData) 
         {
             try
             {
-                var byteBuffer = inputData.Serialize();
-                binWriter.Write(byteBuffer.Length);
-                binWriter.Write(byteBuffer);
+                var byteBuffer = inputData.SerializeToByteArray();
+                //binWriter.Write(byteBuffer.Length);
+                //binWriter.Write(byteBuffer);
+                rjindaelEncryption.EncryptStream(byteBuffer);
                 return true;
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("[DotNETWork] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Send] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
                 return false;
             }
         }
@@ -75,11 +85,11 @@ namespace DotNETWork.Tcp
                 int dataLength = binReader.ReadInt32();
                 receivedData = new byte[dataLength];
                 receivedData = binReader.ReadBytes(dataLength);
-                return receivedData.Deserialize();
+                return receivedData.DeserializeToDynamicType();
             }
             catch(Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("[DotNETWork] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Receive] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
                 return null;
             }
         }
