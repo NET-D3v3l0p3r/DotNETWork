@@ -16,12 +16,10 @@ namespace DotNETWork.Security
         private const string keyName = "rijndaelKey01";
 
         public string PublicKeyXML { get; private set; }
-        public BinaryWriter BinaryWriter { get; private set; }
 
-        public DotRijndaelEncryption(string xmlKey, BinaryWriter binWriter)
+        public DotRijndaelEncryption(string xmlKey)
         {
             PublicKeyXML = xmlKey;
-            BinaryWriter = binWriter;
 
             cspParameters.KeyContainerName = keyName;
 
@@ -30,7 +28,7 @@ namespace DotNETWork.Security
             rsacProvider.PersistKeyInCsp = true;
         }
 
-        public void EncryptStream(byte[] inputArray)
+        public byte[] EncryptStream(byte[] inputArray)
         {
             RijndaelManaged rjndManaged = new RijndaelManaged();
             rjndManaged.KeySize = rjndManaged.BlockSize = 256;
@@ -74,15 +72,12 @@ namespace DotNETWork.Security
                             bytesRead += blockSizeBytes;
                         } while (count > 0);
                         mStreamIn.Close();
-
                     }
                     cryptoStream.FlushFinalBlock();
                     cryptoStream.Close();
                 }
-
-                BinaryWriter.Write(mStreamOut.ToArray().Length);
-                BinaryWriter.Write(mStreamOut.ToArray());
                 mStreamOut.Close();
+                return mStreamOut.ToArray();
             }
         }
     }

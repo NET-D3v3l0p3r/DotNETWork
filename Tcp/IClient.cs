@@ -15,13 +15,15 @@ using System.IO;
 using DotNETWork.Globals;
 namespace DotNETWork.Tcp
 {
-    public interface IClient
+    public interface IClient 
     {
         IPEndPoint ClientEndPoint { get; set; }
         TcpClient TcpClient { get; set; }
 
         BinaryReader BinReader { get; set; }
         BinaryWriter BinWriter { get; set; }
+
+        string PublicKeyXML { get; set; }
 
         /// <summary>
         /// The parameter contains the DotNETWork-TcpServer.

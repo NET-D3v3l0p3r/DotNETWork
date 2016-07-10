@@ -93,7 +93,8 @@ namespace DotNETWork.Security
                         cryptoStream.Close();
 
                     }
-
+                    mStreamOut.Close();
+                    mStreamIn.Close();
                     return mStreamOut.ToArray();
                 }
 

@@ -21,10 +21,12 @@ namespace DotNETWork.Tcp
         public IPEndPoint LocalIPEndPoint { get; private set; }
         public List<T> ClientList { get; private set; }
 
+        public int MaximumClients { get; set; }
         public bool IsActive;
 
         private TcpListener tcpListener;
         private Thread listenerThread;
+        private int clientCounter;
 
         public DotRijndaelDecryption RijndaelDecryption;
 
@@ -47,37 +49,61 @@ namespace DotNETWork.Tcp
                 while (IsActive)
                 {
                     var acceptedClient = tcpListener.AcceptTcpClient();
-
-                    ClientList.Add(new T()
+                    if (clientCounter != MaximumClients)
                     {
-                        TcpClient = acceptedClient,
-                        BinReader = new BinaryReader(acceptedClient.GetStream()),
-                        BinWriter = new BinaryWriter(acceptedClient.GetStream()),
-                        ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[1]))
-                    });
-
-                    new Thread(new ParameterizedThreadStart((object @object) =>
-                    {
-                        T threadClient = (T)@object;
-                        
-                        RijndaelDecryption.SendPublicKeyXML(threadClient.BinWriter);
-
-                        while (threadClient.TcpClient.Connected)
+                        T inClient = new T()
                         {
-                            threadClient.Call((object)this);
-                            new ManualResetEvent(false).WaitOne(1);
-                        }
+                            TcpClient = acceptedClient,
+                            BinReader = new BinaryReader(acceptedClient.GetStream()),
+                            BinWriter = new BinaryWriter(acceptedClient.GetStream()),
+                            ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[1]))
+                        };
 
-                    })).Start((object)ClientList[ClientList.Count - 1]);
+                        RijndaelDecryption.SendPublicKeyXML(inClient.BinWriter);
 
+                        int publicKeyLength = inClient.BinReader.ReadInt32();
+                        inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
+
+                        Console.WriteLine("[SERVER] Received public key!");
+
+                        ClientList.Add(inClient);
+
+                        new Thread(new ParameterizedThreadStart((object @object) =>
+                        {
+                            T threadClient = (T)@object;
+
+                            ClientParameters<T> clientParams = new ClientParameters<T>();
+                            clientParams.ServerHandler = this;
+
+                            DotRijndaelEncryption rEncryptor = new DotRijndaelEncryption(threadClient.PublicKeyXML);
+
+                            clientCounter++;
+
+                            while (threadClient.TcpClient.Connected)
+                            {
+
+                                clientParams.DecryptedBytes = ForceReading(threadClient.BinReader);
+
+                                threadClient.Call((object)clientParams);
+                                new ManualResetEvent(false).WaitOne(1);
+                            }
+
+                        })).Start((object)ClientList[ClientList.Count - 1]);
+
+                    }
                 }
-
             });
 
             listenerThread.Start();
         }
 
 
+        public byte[] ForceReading(BinaryReader binReader)
+        {
+            int length = binReader.ReadInt32();
+            byte[] decryptedBuffer = RijndaelDecryption.DecryptStream(binReader.ReadBytes(length));
+            return decryptedBuffer;
+        }
 
     }
 }

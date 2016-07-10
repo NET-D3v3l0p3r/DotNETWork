@@ -45,6 +45,7 @@
     <Compile Include="Globals\Extension.cs" />
     <Compile Include="Security\DotRijndaelDecryption.cs" />
     <Compile Include="Security\RijndaelEncryption.cs" />
+    <Compile Include="Tcp\ClientParameters.cs" />
     <Compile Include="Tcp\IClient.cs" />
     <Compile Include="Globals\Utilities.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

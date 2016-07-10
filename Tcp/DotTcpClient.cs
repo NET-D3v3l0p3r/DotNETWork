@@ -28,6 +28,7 @@ namespace DotNETWork.Tcp
         private BinaryWriter binWriter;
 
         private DotRijndaelEncryption rjindaelEncryption;
+        private DotRijndaelDecryption rijndaelDecryption;
 
         public DotTcpClient(string remoteIp, int remotePort)
         {
@@ -55,9 +56,20 @@ namespace DotNETWork.Tcp
 
             // TRY TO GET PUBLIC KEY
             // AND INSTANCIATE RIJNADELENCRYPTION
-            string inputXML = Receive();
-            rjindaelEncryption = new DotRijndaelEncryption(inputXML, binWriter);
 
+            byte[] receivedDataEncrypted = new byte[0];
+            int dataLength = binReader.ReadInt32();
+            receivedDataEncrypted = binReader.ReadBytes(dataLength);
+
+            string inputXML = receivedDataEncrypted.DeserializeToDynamicType();
+            rjindaelEncryption = new DotRijndaelEncryption(inputXML);
+
+            // SEND OWN CREATED PUBLIC KEY
+            // TO SERVER.
+            rijndaelDecryption = new DotRijndaelDecryption();
+            rijndaelDecryption.SendPublicKeyXML(binWriter);
+            
+            Console.WriteLine("[CLIENT] Sent public key!");
 
             return true;
         }
@@ -68,7 +80,9 @@ namespace DotNETWork.Tcp
                 var byteBuffer = inputData.SerializeToByteArray();
                 //binWriter.Write(byteBuffer.Length);
                 //binWriter.Write(byteBuffer);
-                rjindaelEncryption.EncryptStream(byteBuffer);
+                var decryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
+                binWriter.Write(decryptedBuffer.Length);
+                binWriter.Write(decryptedBuffer);
                 return true;
             }
             catch (Exception ex)
@@ -81,11 +95,11 @@ namespace DotNETWork.Tcp
         {
             try
             {
-                byte[] receivedData = new byte[0];
+                byte[] receivedDataEncrypted = new byte[0];
                 int dataLength = binReader.ReadInt32();
-                receivedData = new byte[dataLength];
-                receivedData = binReader.ReadBytes(dataLength);
-                return receivedData.DeserializeToDynamicType();
+                receivedDataEncrypted = binReader.ReadBytes(dataLength);
+                byte[] receivedDataDecrypted = rijndaelDecryption.DecryptStream(receivedDataEncrypted);
+                return receivedDataDecrypted.DeserializeToDynamicType();
             }
             catch(Exception ex)
             {
