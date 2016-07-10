@@ -72,19 +72,12 @@ namespace DotNETWork.Tcp
                         {
                             T threadClient = (T)@object;
 
-                            ClientParameters<T> clientParams = new ClientParameters<T>();
-                            clientParams.ServerHandler = this;
-
                             DotRijndaelEncryption rEncryptor = new DotRijndaelEncryption(threadClient.PublicKeyXML);
-
                             clientCounter++;
 
                             while (threadClient.TcpClient.Connected)
                             {
-
-                                clientParams.DecryptedBytes = ForceReading(threadClient.BinReader);
-
-                                threadClient.Call((object)clientParams);
+                                threadClient.Call((object)this);
                                 new ManualResetEvent(false).WaitOne(1);
                             }
 
@@ -98,7 +91,7 @@ namespace DotNETWork.Tcp
         }
 
 
-        public byte[] ForceReading(BinaryReader binReader)
+        public byte[] Receive(BinaryReader binReader)
         {
             int length = binReader.ReadInt32();
             byte[] decryptedBuffer = RijndaelDecryption.DecryptStream(binReader.ReadBytes(length));
