@@ -14,13 +14,12 @@ namespace DotNETWork.Security
     {
         private CspParameters cspParameters = new CspParameters();
         private RSACryptoServiceProvider rsacProvider;
-        private const string keyName = "rijndaelKey01";
 
-        public DotRijndaelDecryption()
+        public DotRijndaelDecryption(string keyString)
         {
             // Generate private key
-
-            cspParameters.KeyContainerName = keyName;
+           
+            cspParameters.KeyContainerName = keyString;
             
             rsacProvider = new RSACryptoServiceProvider(cspParameters);
             rsacProvider.PersistKeyInCsp = true;
@@ -28,10 +27,15 @@ namespace DotNETWork.Security
 
         public void SendPublicKeyXML(BinaryWriter binWriter)
         {
-            byte[] xmlBuffer = rsacProvider.ToXmlString(false).SerializeToByteArray();
+            byte[] xmlBuffer = GetPublicKeyXML().SerializeToByteArray();
 
             binWriter.Write(xmlBuffer.Length);
             binWriter.Write(xmlBuffer);
+        }
+
+        public string GetPublicKeyXML()
+        {
+            return rsacProvider.ToXmlString(false);
         }
 
         public byte[] DecryptStream(byte[] inputArray)

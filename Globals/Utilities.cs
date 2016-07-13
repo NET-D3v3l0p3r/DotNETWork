@@ -11,6 +11,7 @@ using System.IO;
 using System.Drawing;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
+using System.Security.Cryptography;
 
 
 namespace DotNETWork.Globals
@@ -32,5 +33,38 @@ namespace DotNETWork.Globals
                 .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
         }
 
+        public static string GetMD5Hash(string TextToHash)
+        {
+            //Prüfen ob Daten übergeben wurden.
+            if ((TextToHash == null) || (TextToHash.Length == 0))
+            {
+                return string.Empty;
+            }
+
+            //MD5 Hash aus dem String berechnen. Dazu muss der string in ein Byte[]
+            //zerlegt werden. Danach muss das Resultat wieder zurück in ein string.
+            MD5 md5 = new MD5CryptoServiceProvider();
+            byte[] textToHash = Encoding.Default.GetBytes(TextToHash);
+            byte[] result = md5.ComputeHash(textToHash);
+
+            return System.BitConverter.ToString(result);
+        }
+
+        public static string GenerateRandomKeyContainerName(int nameLength)
+        {
+            if (nameLength % 2 != 0)
+                throw new Exception("Parameter nameLength must be a power of 2!");
+
+            string resultText = "";
+
+            string keyCharacters = @"abcdefghijklmnopqrstuvwxyz1234567890!§$%&()=?´'.:-^°@#+-*/[]{}\";
+
+            for (int i = 0; i < nameLength; i++)
+            {
+                resultText += Random.NextDouble() >= 0.5 ? keyCharacters.Substring(Random.Next(0, keyCharacters.Length), 1).ToUpper() : keyCharacters.Substring(Random.Next(0, keyCharacters.Length), 1);
+            }
+
+            return resultText;
+        }
     }
 }

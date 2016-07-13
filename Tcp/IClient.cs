@@ -17,6 +17,8 @@ namespace DotNETWork.Tcp
 {
     public interface IClient 
     {
+        string UserID { get; set; }
+
         IPEndPoint ClientEndPoint { get; set; }
         TcpClient TcpClient { get; set; }
 

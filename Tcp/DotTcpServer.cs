@@ -14,6 +14,7 @@ using System.Diagnostics;
 using System.IO;
 using DotNETWork.Globals;
 using DotNETWork.Security;
+using System.Windows.Forms;
 namespace DotNETWork.Tcp
 {
     public class DotTcpServer<T> where T : IClient, new()
@@ -24,23 +25,39 @@ namespace DotNETWork.Tcp
         public int MaximumClients { get; set; }
         public bool IsActive;
 
+        public bool AllowDirectConnect { get; set; }
+
+        public string EncryptionString { get; private set; }
+
         private TcpListener tcpListener;
         private Thread listenerThread;
         private int clientCounter;
 
         public DotRijndaelDecryption RijndaelDecryption;
 
-        public DotTcpServer(int portNumber)
+        public DotTcpServer(int portNumber, string encryptionString)
         {
             LocalIPEndPoint = new IPEndPoint(Utilities.GetLocalIPv4(), portNumber);
             tcpListener = new TcpListener(LocalIPEndPoint);
 
             ClientList = new List<T>();
 
-            RijndaelDecryption = new DotRijndaelDecryption();
+            EncryptionString = encryptionString;
+
+            RijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("#################################################");
+            Console.WriteLine("       IMPORTANT: SIGNATURE FOR PUBLIC KEY");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(" " + Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML()));
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("          (To copy , run server in cmd)"  );
+            Console.WriteLine("#################################################");
+            Console.WriteLine();    
+            Console.ForegroundColor = ConsoleColor.Gray;
         }
 
-        public void Run()
+        public void StartSession()
         {
             IsActive = true;
             listenerThread = new Thread(() =>
@@ -51,6 +68,8 @@ namespace DotNETWork.Tcp
                     var acceptedClient = tcpListener.AcceptTcpClient();
                     if (clientCounter != MaximumClients)
                     {
+                        
+                        #region "Initializing T"
                         T inClient = new T()
                         {
                             TcpClient = acceptedClient,
@@ -59,25 +78,59 @@ namespace DotNETWork.Tcp
                             ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[1]))
                         };
 
+
+
+                        #region "Direct client"
+                        string connectionMode = inClient.BinReader.ReadString();
+                        if (connectionMode.Split('=')[1].Equals("DIRECT"))
+                        {
+                            string userId = inClient.BinReader.ReadString();
+                            inClient.UserID = userId;
+                            inClient.BinWriter.Write(AllowDirectConnect);
+                            inClient.BinWriter.Write(ClientList.Count(p => p.UserID != null));
+
+                            for (int i = 0; i < ClientList.Count; i++)
+                            {
+                                inClient.BinWriter.Write(ClientList[i].UserID);
+                                inClient.BinWriter.Write(ClientList[i].PublicKeyXML);
+                            }
+
+                        }
+                        #endregion
+
+                        #region "Send verification"
                         RijndaelDecryption.SendPublicKeyXML(inClient.BinWriter);
-
-                        int publicKeyLength = inClient.BinReader.ReadInt32();
-                        inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
-
-                        Console.WriteLine("[SERVER] Received public key!");
-
+                        try
+                        {
+                            int publicKeyLength = inClient.BinReader.ReadInt32();
+                            inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Windows.Forms.MessageBox.Show("[DotNETWork ~StartSession] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                            break;
+                        }
+                        #endregion
                         ClientList.Add(inClient);
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("---USER_ADDED---");
+                        Console.ForegroundColor = ConsoleColor.Gray;
 
+                        #endregion
                         new Thread(new ParameterizedThreadStart((object @object) =>
                         {
                             T threadClient = (T)@object;
-
-                            DotRijndaelEncryption rEncryptor = new DotRijndaelEncryption(threadClient.PublicKeyXML);
                             clientCounter++;
 
                             while (threadClient.TcpClient.Connected)
                             {
-                                threadClient.Call((object)this);
+                                if (threadClient.UserID != null)
+                                {
+                                    // ...
+                                    Console.WriteLine(Receive(threadClient.BinReader).DeserializeToDynamicType());
+                                }
+                                else
+                                    threadClient.Call((object)this);
                                 new ManualResetEvent(false).WaitOne(1);
                             }
 
@@ -90,12 +143,29 @@ namespace DotNETWork.Tcp
             listenerThread.Start();
         }
 
+        //public void CopyVerificationCodeToClipboard()
+        //{
+        //    var copyThread = new Thread(new ThreadStart(() =>
+        //    {
+        //        Clipboard.SetText(Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML()));
+        //    }));
+        //    copyThread.SetApartmentState(ApartmentState.STA);
+        //    copyThread.Start();
+        //}
 
         public byte[] Receive(BinaryReader binReader)
         {
-            int length = binReader.ReadInt32();
-            byte[] decryptedBuffer = RijndaelDecryption.DecryptStream(binReader.ReadBytes(length));
-            return decryptedBuffer;
+            try
+            {
+                int length = binReader.ReadInt32();
+                byte[] decryptedBuffer = RijndaelDecryption.DecryptStream(binReader.ReadBytes(length));
+                return decryptedBuffer;
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Receive] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                return null;
+            }
         }
 
     }

@@ -14,6 +14,7 @@ using System.Diagnostics;
 using System.IO;
 using DotNETWork.Globals;
 using DotNETWork.Security;
+using System.Windows.Forms;
 
 namespace DotNETWork.Tcp
 {
@@ -21,6 +22,11 @@ namespace DotNETWork.Tcp
     {
         public IPEndPoint LocalEndpoint { get; private set; }
         public IPEndPoint RemoteEndPoint { get; set; }
+
+        public delegate void OnConnectedDelegate( );
+        public event OnConnectedDelegate OnConnected;
+
+        public string EncryptionString { get; private set; }
 
         private TcpClient tcpClient;
 
@@ -30,19 +36,25 @@ namespace DotNETWork.Tcp
         private DotRijndaelEncryption rjindaelEncryption;
         private DotRijndaelDecryption rijndaelDecryption;
 
-        public DotTcpClient(string remoteIp, int remotePort)
+        private string verificationHash = "";
+
+        public DotTcpClient(string remoteIp, int remotePort, string encryptionString)
         {
             RemoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIp), remotePort);
+            EncryptionString = encryptionString;
         }
 
         private void initLocalEndPoint()
         {
-            LocalEndpoint = new IPEndPoint(Utilities.GetLocalIPv4(), Utilities.Random.Next(2000, 10000));
+            LocalEndpoint = new IPEndPoint(Utilities.GetLocalIPv4(), Utilities.Random.Next(IPEndPoint.MinPort, IPEndPoint.MaxPort));
             tcpClient = new TcpClient(LocalEndpoint);
         }
 
-        public bool Connect(int ms)
+        public bool StartSession(int ms)
         {
+            if (string.IsNullOrWhiteSpace(verificationHash))
+                throw new Exception("An verification hash must be set!");
+
             initLocalEndPoint();
             IAsyncResult asyncResult = tcpClient.BeginConnect(RemoteEndPoint.Address.MapToIPv4(), RemoteEndPoint.Port, null, null);
             bool connectionStatus = asyncResult.AsyncWaitHandle.WaitOne(ms);
@@ -54,43 +66,88 @@ namespace DotNETWork.Tcp
             binReader = new BinaryReader(tcpClient.GetStream());
             binWriter = new BinaryWriter(tcpClient.GetStream());
 
+            // INFORM CONNECTION MODE
+            binWriter.Write("CONNECTION=DEFAULT");
+
             // TRY TO GET PUBLIC KEY
             // AND INSTANCIATE RIJNADELENCRYPTION
 
-            byte[] receivedDataEncrypted = new byte[0];
+            byte[] receivedDataDecrypted = new byte[0];
             int dataLength = binReader.ReadInt32();
-            receivedDataEncrypted = binReader.ReadBytes(dataLength);
+            receivedDataDecrypted = binReader.ReadBytes(dataLength);
 
-            string inputXML = receivedDataEncrypted.DeserializeToDynamicType();
+            string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
+            // VERIFY PUBLIC KEY HTML
+            if (!verificationHash.Equals(Utilities.GetMD5Hash(inputXML)))
+            {
+                MessageBox.Show("Attention: The hash of the received Public-Key-XML is not equivalent to the verification hash:" + Environment.NewLine  +
+                    "Verification hash: " + verificationHash  + Environment.NewLine +
+                    "Received hash: " + Utilities.GetMD5Hash(inputXML) + Environment.NewLine + 
+                    "The XML is probably corrupt which is common in MITM-Attacks." + Environment.NewLine + 
+                    "The connection will be closed immadiatly!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("[*]CONNECTION LOST DUE CORRUPT KEY EXCEPTION!");
+                tcpClient.Close();
+                binReader.Close();
+                binWriter.Close();
+                return false;
+            }
             rjindaelEncryption = new DotRijndaelEncryption(inputXML);
 
             // SEND OWN CREATED PUBLIC KEY
             // TO SERVER.
-            rijndaelDecryption = new DotRijndaelDecryption();
+            rijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
             rijndaelDecryption.SendPublicKeyXML(binWriter);
-            
-            Console.WriteLine("[CLIENT] Sent public key!");
 
+            OnConnected();
             return true;
         }
-        public bool Send(object inputData) 
+
+        public void SetVerificationHash(string vHash)
+        {
+            verificationHash = vHash;
+        }
+
+        public bool Send(object inputData)
         {
             try
             {
                 var byteBuffer = inputData.SerializeToByteArray();
                 //binWriter.Write(byteBuffer.Length);
                 //binWriter.Write(byteBuffer);
-                var decryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
-                binWriter.Write(decryptedBuffer.Length);
-                binWriter.Write(decryptedBuffer);
+                var encryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
+                binWriter.Write(encryptedBuffer.Length);
+                binWriter.Write(encryptedBuffer);
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
-                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Send] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
                 return false;
             }
         }
+
+        public async Task<bool> SendAsync(object inputData)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    var byteBuffer = inputData.SerializeToByteArray();
+                    //binWriter.Write(byteBuffer.Length);
+                    //binWriter.Write(byteBuffer);
+                    var decryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
+                    binWriter.Write(decryptedBuffer.Length);
+                    binWriter.Write(decryptedBuffer);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            });
+        }
+
         public dynamic Receive()
         {
             try
@@ -101,12 +158,32 @@ namespace DotNETWork.Tcp
                 byte[] receivedDataDecrypted = rijndaelDecryption.DecryptStream(receivedDataEncrypted);
                 return receivedDataDecrypted.DeserializeToDynamicType();
             }
-            catch(Exception ex)
+            catch
             {
-                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Receive] The host (" + RemoteEndPoint + ") closed the connection." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
-                return null;
+                return false;
             }
         }
+
+
+        public async Task<dynamic> ReceiveAsync()
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    byte[] receivedDataEncrypted = new byte[0];
+                    int dataLength = binReader.ReadInt32();
+                    receivedDataEncrypted = binReader.ReadBytes(dataLength);
+                    byte[] receivedDataDecrypted = rijndaelDecryption.DecryptStream(receivedDataEncrypted);
+                    return receivedDataDecrypted.DeserializeToDynamicType();
+                }
+                catch
+                {
+                    return false;
+                }
+            });
+        }
+    
 
 
     }
