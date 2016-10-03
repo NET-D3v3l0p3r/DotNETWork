@@ -26,7 +26,7 @@ namespace DotNETWork.Tcp
         public delegate void OnConnectedDelegate( );
         public event OnConnectedDelegate OnConnected;
 
-        public string EncryptionString { get; private set; }
+        public string Keyset { get; private set; }
 
         private TcpClient tcpClient;
 
@@ -41,7 +41,7 @@ namespace DotNETWork.Tcp
         public DotTcpClient(string remoteIp, int remotePort, string encryptionString)
         {
             RemoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIp), remotePort);
-            EncryptionString = encryptionString;
+            Keyset = encryptionString;
         }
 
         private void initLocalEndPoint()
@@ -67,7 +67,6 @@ namespace DotNETWork.Tcp
             binWriter = new BinaryWriter(tcpClient.GetStream());
 
             // INFORM CONNECTION MODE
-            binWriter.Write("CONNECTION=DEFAULT");
 
             // TRY TO GET PUBLIC KEY
             // AND INSTANCIATE RIJNADELENCRYPTION
@@ -93,12 +92,17 @@ namespace DotNETWork.Tcp
                 binWriter.Close();
                 return false;
             }
+
+ 
+
             rjindaelEncryption = new DotRijndaelEncryption(inputXML);
 
             // SEND OWN CREATED PUBLIC KEY
             // TO SERVER.
-            rijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
+            rijndaelDecryption = new DotRijndaelDecryption(Keyset);
             rijndaelDecryption.SendPublicKeyXML(binWriter);
+            
+            binWriter.Write("CONNECTION=DEFAULT");
 
             OnConnected();
             return true;

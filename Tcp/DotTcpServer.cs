@@ -27,7 +27,7 @@ namespace DotNETWork.Tcp
 
         public bool AllowDirectConnect { get; set; }
 
-        public string EncryptionString { get; private set; }
+        public string Keyset { get; private set; }
 
         private TcpListener tcpListener;
         private Thread listenerThread;
@@ -42,9 +42,9 @@ namespace DotNETWork.Tcp
 
             ClientList = new List<T>();
 
-            EncryptionString = encryptionString;
+            Keyset = encryptionString;
 
-            RijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
+            RijndaelDecryption = new DotRijndaelDecryption(Keyset);
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("#################################################");
             Console.WriteLine("       IMPORTANT: SIGNATURE FOR PUBLIC KEY");
@@ -68,7 +68,7 @@ namespace DotNETWork.Tcp
                     var acceptedClient = tcpListener.AcceptTcpClient();
                     if (clientCounter != MaximumClients)
                     {
-                        
+
                         #region "Initializing T"
                         T inClient = new T()
                         {
@@ -78,7 +78,19 @@ namespace DotNETWork.Tcp
                             ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[1]))
                         };
 
-
+                        #region "Send verification"
+                        RijndaelDecryption.SendPublicKeyXML(inClient.BinWriter);
+                        try
+                        {
+                            int publicKeyLength = inClient.BinReader.ReadInt32();
+                            inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Windows.Forms.MessageBox.Show("[DotNETWork ~StartSession] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                            break;
+                        }
+                        #endregion
 
                         #region "Direct client"
                         string connectionMode = inClient.BinReader.ReadString();
@@ -98,19 +110,7 @@ namespace DotNETWork.Tcp
                         }
                         #endregion
 
-                        #region "Send verification"
-                        RijndaelDecryption.SendPublicKeyXML(inClient.BinWriter);
-                        try
-                        {
-                            int publicKeyLength = inClient.BinReader.ReadInt32();
-                            inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Windows.Forms.MessageBox.Show("[DotNETWork ~StartSession] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
-                            break;
-                        }
-                        #endregion
+
                         ClientList.Add(inClient);
                         Console.ForegroundColor = ConsoleColor.Green;
                         Console.WriteLine("---USER_ADDED---");
@@ -142,16 +142,6 @@ namespace DotNETWork.Tcp
 
             listenerThread.Start();
         }
-
-        //public void CopyVerificationCodeToClipboard()
-        //{
-        //    var copyThread = new Thread(new ThreadStart(() =>
-        //    {
-        //        Clipboard.SetText(Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML()));
-        //    }));
-        //    copyThread.SetApartmentState(ApartmentState.STA);
-        //    copyThread.Start();
-        //}
 
         public byte[] Receive(BinaryReader binReader)
         {

@@ -64,6 +64,18 @@ namespace DotNETWork.Tcp.Direct
             binReader = new BinaryReader(tcpClient.GetStream());
             binWriter = new BinaryWriter(tcpClient.GetStream());
 
+            byte[] receivedDataDecrypted = new byte[0];
+            int dataLength = binReader.ReadInt32();
+            receivedDataDecrypted = binReader.ReadBytes(dataLength);
+
+            string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
+            rjindaelEncryption = new DotRijndaelEncryption(inputXML);
+
+            // SEND OWN CREATED PUBLIC KEY
+            // TO SERVER.
+            rijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
+            rijndaelDecryption.SendPublicKeyXML(binWriter);
+
             // REQUEST DIRECT CONNECTION PRIVILEGES
 
             binWriter.Write("CONNECTION=DIRECT");
@@ -99,18 +111,6 @@ namespace DotNETWork.Tcp.Direct
             }
 
             Console.WriteLine("ADDED " + UserKeyPair.Count + " KEYS");
-
-            byte[] receivedDataDecrypted = new byte[0];
-            int dataLength = binReader.ReadInt32();
-            receivedDataDecrypted = binReader.ReadBytes(dataLength);
-
-            string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
-            rjindaelEncryption = new DotRijndaelEncryption(inputXML);
-
-            // SEND OWN CREATED PUBLIC KEY
-            // TO SERVER.
-            rijndaelDecryption = new DotRijndaelDecryption(EncryptionString);
-            rijndaelDecryption.SendPublicKeyXML(binWriter);
 
             OnConnected();
 

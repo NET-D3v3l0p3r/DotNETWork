@@ -53,7 +53,7 @@ namespace DotNETWork.Globals
         public static string GenerateRandomKeyContainerName(int nameLength)
         {
             if (nameLength % 2 != 0)
-                throw new Exception("Parameter nameLength must be a power of 2!");
+                throw new Exception("Parameter nameLength must be devisible by 2!");
 
             string resultText = "";
 
