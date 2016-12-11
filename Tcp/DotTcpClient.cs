@@ -28,6 +28,10 @@ namespace DotNETWork.Tcp
 
         public string Keyset { get; private set; }
 
+        public string ID { get; private set; }
+
+        public bool DirectConnectionAllowed { get; private set; }
+
         private TcpClient tcpClient;
 
         private BinaryReader binReader;
@@ -36,12 +40,15 @@ namespace DotNETWork.Tcp
         private DotRijndaelEncryption rjindaelEncryption;
         private DotRijndaelDecryption rijndaelDecryption;
 
+        private Dictionary<string, string> UserKeyPair = new Dictionary<string, string>();
+
         private string verificationHash = "";
 
-        public DotTcpClient(string remoteIp, int remotePort, string encryptionString)
+        public DotTcpClient(string remoteIp, int remotePort, string encryptionString, string username)
         {
             RemoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIp), remotePort);
             Keyset = encryptionString;
+            ID = username;
         }
 
         private void initLocalEndPoint()
@@ -101,8 +108,39 @@ namespace DotNETWork.Tcp
             // TO SERVER.
             rijndaelDecryption = new DotRijndaelDecryption(Keyset);
             rijndaelDecryption.SendPublicKeyXML(binWriter);
-            
-            binWriter.Write("CONNECTION=DEFAULT");
+
+
+            binWriter.Write(ID);
+
+            bool requestState = binReader.ReadBoolean();
+
+            DirectConnectionAllowed = requestState;
+            if (DirectConnectionAllowed)
+            {
+                int activeUsers = binReader.ReadInt32();
+
+                // RECEIVE PUBLIC KEYS OF USERS
+
+                for (int i = 0; i < activeUsers; i++)
+                {
+                    // READ USER_ID
+                    string userId = binReader.ReadString();
+
+                    // READ PUBLIC KEY
+                    string publicKeyXML = binReader.ReadString();
+
+                    // FINALLY ADD TO DICTIONARY
+
+                    UserKeyPair.Add(userId, publicKeyXML);
+
+                }
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("ADDED " + UserKeyPair.Count + " KEY(S)");
+                Console.ForegroundColor = ConsoleColor.Gray;
+            }
+
+
 
             OnConnected();
             return true;
@@ -123,6 +161,46 @@ namespace DotNETWork.Tcp
                 var encryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
                 binWriter.Write(encryptedBuffer.Length);
                 binWriter.Write(encryptedBuffer);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool SendDirect(object inputData, string toUser)
+        {
+            if(!DirectConnectionAllowed)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("NO PRIVILIGES TO DO THIS!");
+                Console.ForegroundColor = ConsoleColor.Gray;
+                return false;
+            }
+            if(!UserKeyPair.ContainsKey(toUser))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("USER " + toUser + " DOES NOT EXIST (YET) !");
+                Console.ForegroundColor = ConsoleColor.Gray;
+                return false;
+            }
+            try
+            {
+                var encryptedBuffer = rjindaelEncryption.EncryptStream("DIRECT_USER".SerializeToByteArray());
+                binWriter.Write(encryptedBuffer.Length);
+                binWriter.Write(encryptedBuffer);
+
+                encryptedBuffer = rjindaelEncryption.EncryptStream(toUser.SerializeToByteArray());
+                binWriter.Write(encryptedBuffer.Length);
+                binWriter.Write(encryptedBuffer);
+
+                var message = inputData.SerializeToByteArray();
+                DotRijndaelEncryption rijndaelEncryptionAnon = new DotRijndaelEncryption(UserKeyPair[toUser]);
+                encryptedBuffer = rijndaelEncryptionAnon.EncryptStream(message);
+                var encrypted = rjindaelEncryption.EncryptStream(encryptedBuffer);
+                binWriter.Write(encrypted.Length);
+                binWriter.Write(encrypted);
                 return true;
             }
             catch
@@ -160,7 +238,35 @@ namespace DotNETWork.Tcp
                 int dataLength = binReader.ReadInt32();
                 receivedDataEncrypted = binReader.ReadBytes(dataLength);
                 byte[] receivedDataDecrypted = rijndaelDecryption.DecryptStream(receivedDataEncrypted);
-                return receivedDataDecrypted.DeserializeToDynamicType();
+                var data = receivedDataDecrypted.DeserializeToDynamicType();
+
+                if ( DirectConnectionAllowed && data is string)
+                {
+                    string s = (string)data;
+                    if (s.Equals("DIRECT_CONFIG"))
+                    {
+                        string userID = Receive();
+                        string xml = Receive();
+
+                        UserKeyPair.Add(userID, xml);
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("ADDED 1 KEY(S)");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+
+                        return "";
+                    }
+                    else if (s.Equals("REMOVE_USER"))
+                    {
+                        string userID = Receive();
+                        UserKeyPair.Remove(userID);
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("REMOVED 1 KEY(S)");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        return "";
+                    }
+                }
+
+                return data;
             }
             catch
             {

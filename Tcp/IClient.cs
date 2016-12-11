@@ -31,6 +31,6 @@ namespace DotNETWork.Tcp
         /// The parameter contains the DotNETWork-TcpServer.
         /// </summary>
         /// <param name="parameter"></param>
-        void Call(object parameter);
+        void Call(object parameter, byte[] decrypted);
     }
 }

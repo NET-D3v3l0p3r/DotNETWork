@@ -31,7 +31,6 @@ namespace DotNETWork.Tcp
 
         private TcpListener tcpListener;
         private Thread listenerThread;
-        private int clientCounter;
 
         public DotRijndaelDecryption RijndaelDecryption;
 
@@ -51,9 +50,9 @@ namespace DotNETWork.Tcp
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine(" " + Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML()));
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("          (To copy , run server in cmd)"  );
+            Console.WriteLine("          (To copy , run server in cmd)");
             Console.WriteLine("#################################################");
-            Console.WriteLine();    
+            Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Gray;
         }
 
@@ -65,8 +64,9 @@ namespace DotNETWork.Tcp
                 tcpListener.Start();
                 while (IsActive)
                 {
+                    bool isInvalid = false;
                     var acceptedClient = tcpListener.AcceptTcpClient();
-                    if (clientCounter != MaximumClients)
+                    if (ClientList.Count != MaximumClients)
                     {
 
                         #region "Initializing T"
@@ -87,19 +87,22 @@ namespace DotNETWork.Tcp
                         }
                         catch (Exception ex)
                         {
-                            System.Windows.Forms.MessageBox.Show("[DotNETWork ~StartSession] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
-                            break;
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine("[*] INVALID HASH!");
+                            Console.ForegroundColor = ConsoleColor.Gray;
+                            isInvalid = true;
                         }
                         #endregion
-
+                        if (isInvalid)
+                            continue;
                         #region "Direct client"
-                        string connectionMode = inClient.BinReader.ReadString();
-                        if (connectionMode.Split('=')[1].Equals("DIRECT"))
+
+                        string userId = inClient.BinReader.ReadString();
+                        inClient.UserID = userId;
+                        inClient.BinWriter.Write(AllowDirectConnect);
+                        if (AllowDirectConnect)
                         {
-                            string userId = inClient.BinReader.ReadString();
-                            inClient.UserID = userId;
-                            inClient.BinWriter.Write(AllowDirectConnect);
-                            inClient.BinWriter.Write(ClientList.Count(p => p.UserID != null));
+                            inClient.BinWriter.Write(ClientList.Count(p => p.UserID != inClient.UserID));
 
                             for (int i = 0; i < ClientList.Count; i++)
                             {
@@ -107,30 +110,65 @@ namespace DotNETWork.Tcp
                                 inClient.BinWriter.Write(ClientList[i].PublicKeyXML);
                             }
 
-                        }
-                        #endregion
+                            for (int i = 0; i < ClientList.Count; i++)
+                            {
+                                var client = ClientList[i];
 
+                                DotRijndaelEncryption rEncryptor = new DotRijndaelEncryption(client.PublicKeyXML);
+
+                                var encBytes = rEncryptor.EncryptStream("DIRECT_CONFIG".SerializeToByteArray());
+
+                                client.BinWriter.Write(encBytes.Length);
+                                client.BinWriter.Write(encBytes);
+
+                                encBytes = rEncryptor.EncryptStream(inClient.UserID.SerializeToByteArray());
+
+                                client.BinWriter.Write(encBytes.Length);
+                                client.BinWriter.Write(encBytes);
+
+                                encBytes = rEncryptor.EncryptStream(inClient.PublicKeyXML.SerializeToByteArray());
+
+                                client.BinWriter.Write(encBytes.Length);
+                                client.BinWriter.Write(encBytes);
+
+                            }
+                        }
+
+                        #endregion
 
                         ClientList.Add(inClient);
                         Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("---USER_ADDED---");
+                        Console.WriteLine("[*] USER " + inClient.UserID + " ADDED!");
                         Console.ForegroundColor = ConsoleColor.Gray;
 
                         #endregion
                         new Thread(new ParameterizedThreadStart((object @object) =>
                         {
                             T threadClient = (T)@object;
-                            clientCounter++;
-
                             while (threadClient.TcpClient.Connected)
                             {
-                                if (threadClient.UserID != null)
+                                byte[] decrypted = Receive(threadClient.BinReader);
+                                if (decrypted == null)
+                                    continue;
+                                var temp = decrypted.DeserializeToDynamicType();
+                                if (AllowDirectConnect && temp is string)
                                 {
-                                    // ...
-                                    Console.WriteLine(Receive(threadClient.BinReader).DeserializeToDynamicType());
+                                    string s = (string)temp;
+                                    if (s.Equals("DIRECT_USER"))
+                                    {
+                                        string toUser = Receive(threadClient.BinReader).DeserializeToDynamicType();
+                                        var toClient = ClientList.Find(p => p.UserID.Equals(toUser));
+
+                                        byte[] message = Receive(threadClient.BinReader);
+
+                                        toClient.BinWriter.Write(message.Length);
+                                        toClient.BinWriter.Write(message);
+                                    }
+                                    else
+                                        threadClient.Call((object)this, decrypted);
                                 }
                                 else
-                                    threadClient.Call((object)this);
+                                    threadClient.Call((object)this, decrypted);
                                 new ManualResetEvent(false).WaitOne(1);
                             }
 
@@ -141,6 +179,10 @@ namespace DotNETWork.Tcp
             });
 
             listenerThread.Start();
+
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("[*] LISTENING ON " + LocalIPEndPoint);
+            Console.ForegroundColor = ConsoleColor.Gray;
         }
 
         public byte[] Receive(BinaryReader binReader)
@@ -153,7 +195,33 @@ namespace DotNETWork.Tcp
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("[DotNETWork ~Receive] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                //System.Windows.Forms.MessageBox.Show("[DotNETWork ~Receive] Fatal server error.." + Environment.NewLine + "Message: " + ex.Message, "Message", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error, System.Windows.Forms.MessageBoxDefaultButton.Button2, System.Windows.Forms.MessageBoxOptions.ServiceNotification, false);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("[*] USER " + ClientList.Find(p => p.BinReader.Equals(binReader)).UserID + " REMOVED!");
+                Console.ForegroundColor = ConsoleColor.Gray;
+
+                if (AllowDirectConnect)
+                    for (int i = 0; i < ClientList.Count; i++)
+                    {
+                        var client = ClientList[i];
+                        if (!client.UserID.Equals(ClientList.Find(p => p.BinReader.Equals(binReader)).UserID))
+                        {
+                            DotRijndaelEncryption rEncryptor = new DotRijndaelEncryption(client.PublicKeyXML);
+
+                            var encBytes = rEncryptor.EncryptStream("REMOVE_USER".SerializeToByteArray());
+
+                            client.BinWriter.Write(encBytes.Length);
+                            client.BinWriter.Write(encBytes);
+
+                            encBytes = rEncryptor.EncryptStream(ClientList.Find(p => p.BinReader.Equals(binReader)).UserID.SerializeToByteArray());
+
+                            client.BinWriter.Write(encBytes.Length);
+                            client.BinWriter.Write(encBytes);
+                        }
+                    }
+
+                ClientList.Remove(ClientList.Find(p => p.BinReader.Equals(binReader)));
+
                 return null;
             }
         }
