@@ -25,7 +25,7 @@ namespace DotNETWork.Udp.ACK
         /// <summary>
         /// A boolean which determines whether and packet is avaible.
         /// </summary>
-        public bool PacketAvaible { get; private set; }
+        public bool PacketAvaible { get; set; }
         /// <summary>
         /// Holds the thread until it receives an UDP-packet.
         /// </summary>
@@ -46,7 +46,6 @@ namespace DotNETWork.Udp.ACK
                     }
                 }
                 byteCollector = new SortedDictionary<int, byte[]>();
-                PacketAvaible = false;
 
                 return dataGram.ToArray().DeserializeToDynamicType();
             }

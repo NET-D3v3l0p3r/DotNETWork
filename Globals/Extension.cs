@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Security.Cryptography;
@@ -12,6 +14,20 @@ namespace DotNETWork.Globals
 {
     public static class Extension
     {
+
+        public static IPEndPoint SendSYN(this Socket socket, EndPoint ipep)
+        {
+            SocketAsyncEventArgs e = new SocketAsyncEventArgs();
+            e.RemoteEndPoint = ipep;
+            try
+            {
+                socket.ConnectAsync(e);
+                IPEndPoint ipEndP = (IPEndPoint)socket.LocalEndPoint;
+                return ipEndP;
+            }
+            catch { return null; }
+        }
+
         public static byte[] SerializeToByteArray(this object objectData)
         {
             byte[] bytes;

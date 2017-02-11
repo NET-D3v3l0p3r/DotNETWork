@@ -13,6 +13,8 @@ using System.Diagnostics;
 
 using System.IO;
 using DotNETWork.Globals;
+using DotNETWork.Security;
+
 namespace DotNETWork.Tcp
 {
     public interface IClient 
@@ -26,11 +28,10 @@ namespace DotNETWork.Tcp
         BinaryWriter BinWriter { get; set; }
 
         string PublicKeyXML { get; set; }
+        DotRijndaelEncryption DotRijndaelEncryption { get; set; }
 
-        /// <summary>
-        /// The parameter contains the DotNETWork-TcpServer.
-        /// </summary>
-        /// <param name="parameter"></param>
-        void Call(object parameter, byte[] decrypted);
+        bool Triggered { get; set; }
+
+        void Call<T>(DotTcpServer<T> server, byte[] decrypted) where T : IClient, new();
     }
 }

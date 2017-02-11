@@ -23,14 +23,14 @@ namespace DotNETWork.Tcp
         public IPEndPoint LocalEndpoint { get; private set; }
         public IPEndPoint RemoteEndPoint { get; set; }
 
-        public delegate void OnConnectedDelegate( );
+        public delegate void OnConnectedDelegate();
         public event OnConnectedDelegate OnConnected;
 
         public string Keyset { get; private set; }
-
         public string ID { get; private set; }
 
         public bool DirectConnectionAllowed { get; private set; }
+        public Dictionary<string, string> UserKeyPair { get; private set; }
 
         private TcpClient tcpClient;
 
@@ -40,8 +40,6 @@ namespace DotNETWork.Tcp
         private DotRijndaelEncryption rjindaelEncryption;
         private DotRijndaelDecryption rijndaelDecryption;
 
-        private Dictionary<string, string> UserKeyPair = new Dictionary<string, string>();
-
         private string verificationHash = "";
 
         public DotTcpClient(string remoteIp, int remotePort, string encryptionString, string username)
@@ -49,29 +47,31 @@ namespace DotNETWork.Tcp
             RemoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIp), remotePort);
             Keyset = encryptionString;
             ID = username;
+            UserKeyPair = new Dictionary<string, string>();
         }
 
         private void initLocalEndPoint()
         {
             LocalEndpoint = new IPEndPoint(Utilities.GetLocalIPv4(), Utilities.Random.Next(IPEndPoint.MinPort, IPEndPoint.MaxPort));
-            tcpClient = new TcpClient(LocalEndpoint);
         }
 
-        public bool StartSession(int ms)
+        public Exception StartSession(int ms)
         {
             if (string.IsNullOrWhiteSpace(verificationHash))
-                throw new Exception("An verification hash must be set!");
+                return new Exception("An verification hash must be set!");
+
 
             initLocalEndPoint();
+            tcpClient = new TcpClient(LocalEndpoint);
             IAsyncResult asyncResult = tcpClient.BeginConnect(RemoteEndPoint.Address.MapToIPv4(), RemoteEndPoint.Port, null, null);
             bool connectionStatus = asyncResult.AsyncWaitHandle.WaitOne(ms);
             if (!connectionStatus)
-                return false;
+                return new DotTcpException("NO CONNECTION");
 
             tcpClient.EndConnect(asyncResult);
-
             binReader = new BinaryReader(tcpClient.GetStream());
             binWriter = new BinaryWriter(tcpClient.GetStream());
+
 
             // INFORM CONNECTION MODE
 
@@ -86,10 +86,10 @@ namespace DotNETWork.Tcp
             // VERIFY PUBLIC KEY HTML
             if (!verificationHash.Equals(Utilities.GetMD5Hash(inputXML)))
             {
-                MessageBox.Show("Attention: The hash of the received Public-Key-XML is not equivalent to the verification hash:" + Environment.NewLine  +
-                    "Verification hash: " + verificationHash  + Environment.NewLine +
-                    "Received hash: " + Utilities.GetMD5Hash(inputXML) + Environment.NewLine + 
-                    "The XML is probably corrupt which is common in MITM-Attacks." + Environment.NewLine + 
+                MessageBox.Show("Attention: The hash of the received Public-Key-XML is not equivalent to the verification hash:" + Environment.NewLine +
+                    "Verification hash: " + verificationHash + Environment.NewLine +
+                    "Received hash: " + Utilities.GetMD5Hash(inputXML) + Environment.NewLine +
+                    "The XML is probably corrupt which is common in MITM-Attacks." + Environment.NewLine +
                     "The connection will be closed immadiatly!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
 
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -97,10 +97,10 @@ namespace DotNETWork.Tcp
                 tcpClient.Close();
                 binReader.Close();
                 binWriter.Close();
-                return false;
+                return new DotTcpException("CORRUPT KEY EXCEPTION");
             }
 
- 
+
 
             rjindaelEncryption = new DotRijndaelEncryption(inputXML);
 
@@ -111,6 +111,14 @@ namespace DotNETWork.Tcp
 
 
             binWriter.Write(ID);
+            string response = binReader.ReadString();
+            if (response.Equals("INVALID_USERNAME"))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("USERNAME ALREADY EXISTS");
+                Console.ForegroundColor = ConsoleColor.Gray;
+                return new DotUserException("USERNAME ALREADY EXISTS");
+            }
 
             bool requestState = binReader.ReadBoolean();
 
@@ -143,15 +151,16 @@ namespace DotNETWork.Tcp
 
 
             OnConnected();
-            return true;
+            return null;
         }
 
-        public void SetVerificationHash(string vHash)
+
+        public void SetVerificationHash(string hash)
         {
-            verificationHash = vHash;
+            verificationHash = hash;
         }
 
-        public bool Send(object inputData)
+        public Exception Send(object inputData)
         {
             try
             {
@@ -161,29 +170,29 @@ namespace DotNETWork.Tcp
                 var encryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
                 binWriter.Write(encryptedBuffer.Length);
                 binWriter.Write(encryptedBuffer);
-                return true;
+                return null;
             }
             catch
             {
-                return false;
+                return new DotTcpException("NO CONNECTION");
             }
         }
 
-        public bool SendDirect(object inputData, string toUser)
+        public Exception SendDirect(object inputData, string toUser)
         {
-            if(!DirectConnectionAllowed)
+            if (!DirectConnectionAllowed)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("NO PRIVILIGES TO DO THIS!");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                return false;
+                return new DotTcpException("NO PRIVILIGES");
             }
-            if(!UserKeyPair.ContainsKey(toUser))
+            if (!UserKeyPair.ContainsKey(toUser))
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("USER " + toUser + " DOES NOT EXIST (YET) !");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                return false;
+                return new DotUserException("USER DOES NOT EXIST");
             }
             try
             {
@@ -201,11 +210,11 @@ namespace DotNETWork.Tcp
                 var encrypted = rjindaelEncryption.EncryptStream(encryptedBuffer);
                 binWriter.Write(encrypted.Length);
                 binWriter.Write(encrypted);
-                return true;
+                return null;
             }
             catch
             {
-                return false;
+                return new DotTcpException("NO CONNECTION");
             }
         }
 
@@ -240,7 +249,7 @@ namespace DotNETWork.Tcp
                 byte[] receivedDataDecrypted = rijndaelDecryption.DecryptStream(receivedDataEncrypted);
                 var data = receivedDataDecrypted.DeserializeToDynamicType();
 
-                if ( DirectConnectionAllowed && data is string)
+                if (DirectConnectionAllowed && data is string)
                 {
                     string s = (string)data;
                     if (s.Equals("DIRECT_CONFIG"))
@@ -252,8 +261,7 @@ namespace DotNETWork.Tcp
                         Console.ForegroundColor = ConsoleColor.Green;
                         Console.WriteLine("ADDED 1 KEY(S)");
                         Console.ForegroundColor = ConsoleColor.Gray;
-
-                        return "";
+                        return new DotUserException("JOINED=" + userID);
                     }
                     else if (s.Equals("REMOVE_USER"))
                     {
@@ -262,7 +270,7 @@ namespace DotNETWork.Tcp
                         Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine("REMOVED 1 KEY(S)");
                         Console.ForegroundColor = ConsoleColor.Gray;
-                        return "";
+                        return new DotUserException("LEFT=" + userID);
                     }
                 }
 
@@ -293,7 +301,7 @@ namespace DotNETWork.Tcp
                 }
             });
         }
-    
+
 
 
     }

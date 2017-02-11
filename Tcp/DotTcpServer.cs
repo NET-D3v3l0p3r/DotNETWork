@@ -25,6 +25,8 @@ namespace DotNETWork.Tcp
         public int MaximumClients { get; set; }
         public bool IsActive;
 
+        public string Signature { get; private set; }
+
         public bool AllowDirectConnect { get; set; }
 
         public string Keyset { get; private set; }
@@ -44,11 +46,13 @@ namespace DotNETWork.Tcp
             Keyset = encryptionString;
 
             RijndaelDecryption = new DotRijndaelDecryption(Keyset);
+            Signature = Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML());
+
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("#################################################");
             Console.WriteLine("       IMPORTANT: SIGNATURE FOR PUBLIC KEY");
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(" " + Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML()));
+            Console.WriteLine(" " + Signature);
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("          (To copy , run server in cmd)");
             Console.WriteLine("#################################################");
@@ -84,6 +88,7 @@ namespace DotNETWork.Tcp
                         {
                             int publicKeyLength = inClient.BinReader.ReadInt32();
                             inClient.PublicKeyXML = inClient.BinReader.ReadBytes(publicKeyLength).DeserializeToDynamicType();
+                            inClient.DotRijndaelEncryption = new DotRijndaelEncryption(inClient.PublicKeyXML);
                         }
                         catch (Exception ex)
                         {
@@ -98,6 +103,15 @@ namespace DotNETWork.Tcp
                         #region "Direct client"
 
                         string userId = inClient.BinReader.ReadString();
+                        if (ClientList.Exists(p => p.UserID.Equals(userId)))
+                        {
+
+                            inClient.BinWriter.Write("INVALID_USERNAME");
+                            continue;
+                        }
+
+                        inClient.BinWriter.Write("SUCCEED");
+
                         inClient.UserID = userId;
                         inClient.BinWriter.Write(AllowDirectConnect);
                         if (AllowDirectConnect)
@@ -165,10 +179,18 @@ namespace DotNETWork.Tcp
                                         toClient.BinWriter.Write(message);
                                     }
                                     else
-                                        threadClient.Call((object)this, decrypted);
+                                    {
+                                        threadClient.Triggered = true;
+                                        threadClient.Call<T>(this, decrypted);
+                                        threadClient.Triggered = false;
+                                    }
                                 }
                                 else
-                                    threadClient.Call((object)this, decrypted);
+                                {
+                                    threadClient.Triggered = true;
+                                    threadClient.Call<T>(this, decrypted);
+                                    threadClient.Triggered = false;
+                                }
                                 new ManualResetEvent(false).WaitOne(1);
                             }
 
@@ -223,6 +245,18 @@ namespace DotNETWork.Tcp
                 ClientList.Remove(ClientList.Find(p => p.BinReader.Equals(binReader)));
 
                 return null;
+            }
+        }
+
+        public void SendToAllClients(IClient host, byte[] decrypted)
+        {
+            if (!host.Triggered)
+                return;
+            foreach (var client in ClientList)
+            {
+                if (!client.PublicKeyXML.Equals(host.PublicKeyXML))
+                    client.Call<T>(this, decrypted);
+
             }
         }
 
