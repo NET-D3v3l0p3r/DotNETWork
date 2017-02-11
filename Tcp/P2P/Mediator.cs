@@ -72,7 +72,7 @@ namespace DotNETWork.Tcp.P2P
                     Client client = new Client(incomingClient);
 
                     client.BinWriter.Write("OK");
-                    RijndaelDecryption.SendPublicKeyXML(client.BinWriter);
+                    client.BinWriter.Write(RijndaelDecryption.GetPublicKeyXML());
 
                     new Thread(new ParameterizedThreadStart((inClient) =>
                     {
@@ -81,7 +81,7 @@ namespace DotNETWork.Tcp.P2P
                         {
                             string command = newClient.BinReader.ReadString();
 
-                            if (command.ToUpper().Contains("REQUEST"))
+                            if (command.ToUpper().Contains("REQUEST_PEER"))
                             {
                                 string id = command.Split('=')[1];
                                 for (int i = 0; i < ConnectedPeers.Count; i++)
@@ -95,6 +95,17 @@ namespace DotNETWork.Tcp.P2P
                                         break;
                                     }
                                 }
+                            }else if (command.ToUpper().Contains("REQUEST_LIST"))
+                            {
+                                StringBuilder sb = new StringBuilder();
+
+                                for (int i = 0; i < ConnectedPeers.Count; i++)
+                                {
+                                    if (!ConnectedPeers[i].Id.Equals(newClient.Id))
+                                        sb.Append(ConnectedPeers[i].Id + Environment.NewLine);
+                                }
+
+                                newClient.BinWriter.Write(sb.ToString());
                             }
                         }
                     })).Start(client);
