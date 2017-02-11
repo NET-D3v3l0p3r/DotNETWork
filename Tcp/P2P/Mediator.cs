@@ -79,8 +79,15 @@ namespace DotNETWork.Tcp.P2P
                         Client newClient = (Client)inClient;
                         while (newClient.Socket.Connected)
                         {
-                            string command = newClient.BinReader.ReadString();
-
+                            string command = "";
+                            try
+                            {
+                                  command = newClient.BinReader.ReadString();
+                            }
+                            catch
+                            {
+                                ConnectedPeers.Remove(newClient);
+                            }
                             if (command.ToUpper().Contains("REQUEST_PEER"))
                             {
                                 string id = command.Split('=')[1];

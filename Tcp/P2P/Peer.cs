@@ -107,8 +107,12 @@ namespace DotNETWork.Tcp.P2P
 
             while (connectorSocket.Connected)
             {
-                string incoming = inReader.ReadString();
-                remoteEndPoint = new IPEndPoint(IPAddress.Parse(incoming.Split(':')[0]), int.Parse(incoming.Split(':')[1]));
+                string signal = inReader.ReadString();
+                if (signal.ToUpper().Contains("RUN=TCPHP"))
+                {
+                    string incoming = inReader.ReadString();
+                    remoteEndPoint = new IPEndPoint(IPAddress.Parse(incoming.Split(':')[0]), int.Parse(incoming.Split(':')[1]));
+                }
             }
 
             Console.ForegroundColor = ConsoleColor.Green;
