@@ -41,9 +41,12 @@ namespace DotNETWork.Tcp.P2P
         private int openedPort;
         private bool isReady;
 
-        public Peer(IPEndPoint mediator)
+        public Peer(IPEndPoint mediator, string mediatorSignature, string id)
         {
             MediatorIPEndPoint = mediator;
+            MediatorSignature = mediatorSignature;
+
+            Id = id;
 
             puncherSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             connectorSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -61,6 +64,8 @@ namespace DotNETWork.Tcp.P2P
 
                 inWriter = new BinaryWriter(new NetworkStream(connectorSocket));
                 inReader = new BinaryReader(new NetworkStream(connectorSocket));
+
+                inWriter.Write(Id);
 
                 if (!inReader.ReadString().ToUpper().Equals("OK"))
                     throw new Exception("INVALID MEDIATOR!" + Environment.NewLine + "REQUESTED OK");
@@ -95,6 +100,81 @@ namespace DotNETWork.Tcp.P2P
             }
         }
 
+        private void runInternal()
+        {
+            new Thread(new ThreadStart(() =>
+            {
+                while (connectorSocket.Connected)
+                {
+                    string signal = inReader.ReadString();
+                    Console.WriteLine(signal);
+                    if (signal.ToUpper().Contains("RUN=TCPHP"))
+                    {
+                        string incoming = inReader.ReadString();
+                        remoteEndPoint = new IPEndPoint(IPAddress.Parse(incoming.Split(':')[0]), int.Parse(incoming.Split(':')[1]));
+                        break;
+                    }
+                }
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("INITIALIZING.");
+                Console.ForegroundColor = ConsoleColor.Gray;
+
+                connectorSocket.Close();
+                connectorSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                connectorSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("OPENING NAT.");
+                Console.ForegroundColor = ConsoleColor.Gray;
+
+                openedPort = puncherSocket.SendSYN(new IPEndPoint(remoteEndPoint.Address, remoteEndPoint.Port)).Port;
+
+                Thread punchingThread = new Thread(new ThreadStart(() =>
+                { 
+                    for (int i = -10; i < 10; i++)
+                    {
+                        try
+                        {
+                            Console.ForegroundColor = ConsoleColor.Blue;
+                            Console.WriteLine("ATTEMPTING!");
+                            Console.ForegroundColor = ConsoleColor.Gray;
+
+                            connectorSocket.Connect(new IPEndPoint(remoteEndPoint.Address, remoteEndPoint.Port + i));
+
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine("CLIENT CONNECTED!");
+                            Console.ForegroundColor = ConsoleColor.Gray;
+
+                            AcceptedPeer = new Client(connectorSocket);
+
+                            break;
+                        }
+                        catch(Exception ex)
+                        {
+                            Console.WriteLine(ex.Message);
+                        }
+                    }
+                }));
+
+                punchingThread.Start();
+
+                acceptorSocket.Bind(new IPEndPoint(localEndPoint.Address, openedPort));
+                acceptorSocket.Listen(1);
+
+                while (true)
+                {
+                    var acceptedClient = acceptorSocket.Accept();
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("CLIENT RECEIVED!");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+
+                    AcceptedPeer = new Client(acceptedClient);
+
+                    break;
+                }
+            })).Start();
+        }
 
         public void StartP2P(string id)
         {
@@ -104,81 +184,10 @@ namespace DotNETWork.Tcp.P2P
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("WAITING FOR REQUEST.");
             Console.ForegroundColor = ConsoleColor.Gray;
-
-            while (connectorSocket.Connected)
-            {
-                string signal = inReader.ReadString();
-                if (signal.ToUpper().Contains("RUN=TCPHP"))
-                {
-                    string incoming = inReader.ReadString();
-                    remoteEndPoint = new IPEndPoint(IPAddress.Parse(incoming.Split(':')[0]), int.Parse(incoming.Split(':')[1]));
-                }
-            }
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("INITIALIZING.");
-            Console.ForegroundColor = ConsoleColor.Gray;
-
-            connectorSocket.Close();
-            connectorSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            connectorSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("OPENING NAT.");
-            Console.ForegroundColor = ConsoleColor.Gray;
-
-            openedPort = puncherSocket.SendSYN(new IPEndPoint(remoteEndPoint.Address, remoteEndPoint.Port)).Port;
-
-            Thread punchingThread = new Thread(new ThreadStart(() =>
-            {
-                for (int i = -10; i < 10; i++)
-                {
-                    if (remoteEndPoint.Port + i == openedPort)
-                        continue;
-                    try
-                    {
-                        Console.ForegroundColor = ConsoleColor.Blue;
-                        Console.WriteLine("ATTEMPTING!");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-
-                        connectorSocket.Connect(new IPEndPoint(remoteEndPoint.Address, remoteEndPoint.Port + i));
-
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine("CLIENT CONNECTED!");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-
-                        AcceptedPeer = new Client(connectorSocket);
-
-                        break;
-                    }
-                    catch
-                    {
-
-                    }
-                }
-            }));
-
-            punchingThread.Start();
-
-            acceptorSocket.Bind(new IPEndPoint(localEndPoint.Address, openedPort));
-            acceptorSocket.Listen(1);
-
-            while (true)
-            {
-                var acceptedClient = acceptorSocket.Accept();
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("CLIENT RECEIVED!");
-                Console.ForegroundColor = ConsoleColor.Gray;
-
-                AcceptedPeer = new Client(acceptedClient);
-
-                break;
-            }
-
         }
 
 
-        public IEnumerator<string> GetActivePeers()
+        public IEnumerable<string> GetActivePeers()
         {
             inWriter.Write("REQUEST_LIST");
 
@@ -189,6 +198,8 @@ namespace DotNETWork.Tcp.P2P
             {
                 yield return users[i];
             }
+
+            runInternal();
         }
 
         public void SetSignature(string hash)

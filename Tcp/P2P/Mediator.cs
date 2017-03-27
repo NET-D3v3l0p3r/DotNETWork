@@ -69,6 +69,11 @@ namespace DotNETWork.Tcp.P2P
                 {
                     var incomingClient = serverSocket.Accept();
 
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("CLIENT CONNECTED!");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+
+
                     Client client = new Client(incomingClient);
 
                     client.BinWriter.Write("OK");
@@ -86,16 +91,25 @@ namespace DotNETWork.Tcp.P2P
                             }
                             catch
                             {
+                                Console.ForegroundColor = ConsoleColor.Red;
+                                Console.WriteLine("CLIENT REMOVED!");
+                                Console.ForegroundColor = ConsoleColor.Gray;
+
                                 ConnectedPeers.Remove(newClient);
+                                break;
                             }
+
+                            Console.WriteLine(command);
+
                             if (command.ToUpper().Contains("REQUEST_PEER"))
                             {
+                                Console.WriteLine("GO.");
                                 string id = command.Split('=')[1];
                                 for (int i = 0; i < ConnectedPeers.Count; i++)
                                 {
                                     Client peer = ConnectedPeers[i];
 
-                                    if (peer.Id.Equals(id.ToUpper()))
+                                    if (peer.Id.Equals(id))
                                     {
                                         peer.SendEndPointToPeer(newClient);
                                         newClient.SendEndPointToPeer(peer);

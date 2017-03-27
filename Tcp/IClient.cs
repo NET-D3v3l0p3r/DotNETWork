@@ -22,7 +22,9 @@ namespace DotNETWork.Tcp
         string UserID { get; set; }
 
         IPEndPoint ClientEndPoint { get; set; }
-        TcpClient TcpClient { get; set; }
+
+        Socket ServerCommunicationSocket { get; set; }
+        Socket Socket { get; set; }
 
         BinaryReader BinReader { get; set; }
         BinaryWriter BinWriter { get; set; }

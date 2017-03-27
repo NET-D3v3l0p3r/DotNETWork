@@ -19,6 +19,12 @@ namespace DotNETWork.Tcp
 {
     public class DotTcpServer<T> where T : IClient, new()
     {
+        public object Owner { get; set; }
+
+        public string ServerName { get; set; }
+        public string Password { get; set; }
+
+ 
         public IPEndPoint LocalIPEndPoint { get; private set; }
         public List<T> ClientList { get; private set; }
 
@@ -31,15 +37,24 @@ namespace DotNETWork.Tcp
 
         public string Keyset { get; private set; }
 
-        private TcpListener tcpListener;
+        private Socket socketListener;
+        private Socket serverCommunication;
+
         private Thread listenerThread;
 
         public DotRijndaelDecryption RijndaelDecryption;
 
-        public DotTcpServer(int portNumber, string encryptionString)
+        public DotTcpServer(string name, int portNumber, string encryptionString)
         {
+            ServerName = name;
+
             LocalIPEndPoint = new IPEndPoint(Utilities.GetLocalIPv4(), portNumber);
-            tcpListener = new TcpListener(LocalIPEndPoint);
+
+            socketListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            socketListener.Bind(LocalIPEndPoint);
+
+            serverCommunication = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            serverCommunication.Bind(new IPEndPoint(LocalIPEndPoint.Address.MapToIPv4(), portNumber + 1));
 
             ClientList = new List<T>();
 
@@ -58,28 +73,34 @@ namespace DotNETWork.Tcp
             Console.WriteLine("#################################################");
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Gray;
+
+            Clipboard.SetText(Signature);
         }
 
-        public void StartSession()
+        public void StartSession(string pass)
         {
             IsActive = true;
+            Password = pass;
+
             listenerThread = new Thread(() =>
             {
-                tcpListener.Start();
+                socketListener.Listen(2147483647);
+                serverCommunication.Listen(2147483647);
+
                 while (IsActive)
                 {
                     bool isInvalid = false;
-                    var acceptedClient = tcpListener.AcceptTcpClient();
+                    var acceptedSocket = socketListener.Accept();
                     if (ClientList.Count != MaximumClients)
                     {
 
                         #region "Initializing T"
                         T inClient = new T()
                         {
-                            TcpClient = acceptedClient,
-                            BinReader = new BinaryReader(acceptedClient.GetStream()),
-                            BinWriter = new BinaryWriter(acceptedClient.GetStream()),
-                            ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedClient.Client.RemoteEndPoint.ToString().Split(':')[1]))
+                            Socket = acceptedSocket,
+                            BinReader = new BinaryReader(new NetworkStream(acceptedSocket)),
+                            BinWriter = new BinaryWriter(new NetworkStream(acceptedSocket)),
+                            ClientEndPoint = new IPEndPoint(IPAddress.Parse(acceptedSocket.RemoteEndPoint.ToString().Split(':')[0]), int.Parse(acceptedSocket.RemoteEndPoint.ToString().Split(':')[1]))
                         };
 
                         #region "Send verification"
@@ -102,6 +123,21 @@ namespace DotNETWork.Tcp
                             continue;
                         #region "Direct client"
 
+                        inClient.BinWriter.Write(ServerName);
+
+                        inClient.BinWriter.Write(!String.IsNullOrEmpty(Password));
+                        if (!String.IsNullOrEmpty(Password))
+                        {
+                            string userPass = inClient.BinReader.ReadString();
+
+                            if (!userPass.Equals(Password))
+                            {
+                                inClient.BinWriter.Write("INVALID_PASSWORD");
+                                continue;
+                            }
+                            else inClient.BinWriter.Write("SUCEED");
+                        }
+
                         string userId = inClient.BinReader.ReadString();
                         if (ClientList.Exists(p => p.UserID.Equals(userId)))
                         {
@@ -111,6 +147,7 @@ namespace DotNETWork.Tcp
                         }
 
                         inClient.BinWriter.Write("SUCCEED");
+
 
                         inClient.UserID = userId;
                         inClient.BinWriter.Write(AllowDirectConnect);
@@ -148,6 +185,8 @@ namespace DotNETWork.Tcp
                             }
                         }
 
+                        inClient.ServerCommunicationSocket = serverCommunication.Accept();
+
                         #endregion
 
                         ClientList.Add(inClient);
@@ -159,7 +198,10 @@ namespace DotNETWork.Tcp
                         new Thread(new ParameterizedThreadStart((object @object) =>
                         {
                             T threadClient = (T)@object;
-                            while (threadClient.TcpClient.Connected)
+
+                            BinaryWriter specialWriter = new BinaryWriter(new NetworkStream(threadClient.ServerCommunicationSocket));
+
+                            while (threadClient.Socket.Connected)
                             {
                                 byte[] decrypted = Receive(threadClient.BinReader);
                                 if (decrypted == null)
@@ -190,6 +232,10 @@ namespace DotNETWork.Tcp
                                     threadClient.Triggered = true;
                                     threadClient.Call<T>(this, decrypted);
                                     threadClient.Triggered = false;
+
+                                    specialWriter.Write("READY");
+
+
                                 }
                                 new ManualResetEvent(false).WaitOne(1);
                             }
@@ -199,8 +245,8 @@ namespace DotNETWork.Tcp
                     }
                 }
             });
-
             listenerThread.Start();
+
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("[*] LISTENING ON " + LocalIPEndPoint);
@@ -258,6 +304,12 @@ namespace DotNETWork.Tcp
                     client.Call<T>(this, decrypted);
 
             }
+        }
+
+        public void Remove(string id)
+        {
+            ClientList[ClientList.FindIndex(p => p.UserID.Equals(id))].BinWriter.WriteEncrypted("CONNECTION_CLOSED", ClientList[ClientList.FindIndex(p => p.UserID.Equals(id))]);
+            ClientList[ClientList.FindIndex(p => p.UserID.Equals(id))].Socket.Close();   
         }
 
     }

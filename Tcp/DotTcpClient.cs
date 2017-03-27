@@ -20,6 +20,8 @@ namespace DotNETWork.Tcp
 {
     public class DotTcpClient
     {
+        public string ServerName { get; private set; }
+
         public IPEndPoint LocalEndpoint { get; private set; }
         public IPEndPoint RemoteEndPoint { get; set; }
 
@@ -29,10 +31,18 @@ namespace DotNETWork.Tcp
         public string Keyset { get; private set; }
         public string ID { get; private set; }
 
+        public bool IsConnected { get; private set; }
+
         public bool DirectConnectionAllowed { get; private set; }
         public Dictionary<string, string> UserKeyPair { get; private set; }
 
-        private TcpClient tcpClient;
+        public bool OperationRunning { get; private set; }
+
+        private Socket specialClient;
+        private Socket socketClient;
+
+        private BinaryReader specialReader;
+        private Thread dequeueThread;
 
         private BinaryReader binReader;
         private BinaryWriter binWriter;
@@ -42,35 +52,43 @@ namespace DotNETWork.Tcp
 
         private string verificationHash = "";
 
+        private static object SYNC = new object();
+
         public DotTcpClient(string remoteIp, int remotePort, string encryptionString, string username)
         {
             RemoteEndPoint = new IPEndPoint(IPAddress.Parse(remoteIp), remotePort);
             Keyset = encryptionString;
             ID = username;
+
             UserKeyPair = new Dictionary<string, string>();
         }
 
-        private void initLocalEndPoint()
-        {
-            LocalEndpoint = new IPEndPoint(Utilities.GetLocalIPv4(), Utilities.Random.Next(IPEndPoint.MinPort, IPEndPoint.MaxPort));
-        }
 
-        public Exception StartSession(int ms)
+        /// <summary>
+        /// Chaning parameter verify to false increases the security lack!
+        /// </summary>
+        /// <param name="ms"></param>
+        /// <param name="verify"></param>
+        /// <returns></returns>
+        public Exception StartSession(int ms, string pass, bool verify = true)
         {
             if (string.IsNullOrWhiteSpace(verificationHash))
                 return new Exception("An verification hash must be set!");
 
+            specialClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
-            initLocalEndPoint();
-            tcpClient = new TcpClient(LocalEndpoint);
-            IAsyncResult asyncResult = tcpClient.BeginConnect(RemoteEndPoint.Address.MapToIPv4(), RemoteEndPoint.Port, null, null);
+            socketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            IAsyncResult asyncResult = socketClient.BeginConnect(RemoteEndPoint.Address.MapToIPv4(), RemoteEndPoint.Port, null, null);
             bool connectionStatus = asyncResult.AsyncWaitHandle.WaitOne(ms);
             if (!connectionStatus)
                 return new DotTcpException("NO CONNECTION");
 
-            tcpClient.EndConnect(asyncResult);
-            binReader = new BinaryReader(tcpClient.GetStream());
-            binWriter = new BinaryWriter(tcpClient.GetStream());
+            socketClient.EndConnect(asyncResult);
+
+            LocalEndpoint = (IPEndPoint)socketClient.LocalEndPoint;
+
+            binReader = new BinaryReader(new NetworkStream(socketClient));
+            binWriter = new BinaryWriter(new NetworkStream(socketClient));
 
 
             // INFORM CONNECTION MODE
@@ -84,7 +102,8 @@ namespace DotNETWork.Tcp
 
             string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
             // VERIFY PUBLIC KEY HTML
-            if (!verificationHash.Equals(Utilities.GetMD5Hash(inputXML)))
+
+            if (verify && !verificationHash.Equals(Utilities.GetMD5Hash(inputXML)))
             {
                 MessageBox.Show("Attention: The hash of the received Public-Key-XML is not equivalent to the verification hash:" + Environment.NewLine +
                     "Verification hash: " + verificationHash + Environment.NewLine +
@@ -94,13 +113,11 @@ namespace DotNETWork.Tcp
 
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("[*]CONNECTION LOST DUE CORRUPT KEY EXCEPTION!");
-                tcpClient.Close();
+                socketClient.Close();
                 binReader.Close();
                 binWriter.Close();
                 return new DotTcpException("CORRUPT KEY EXCEPTION");
             }
-
-
 
             rjindaelEncryption = new DotRijndaelEncryption(inputXML);
 
@@ -108,6 +125,24 @@ namespace DotNETWork.Tcp
             // TO SERVER.
             rijndaelDecryption = new DotRijndaelDecryption(Keyset);
             rijndaelDecryption.SendPublicKeyXML(binWriter);
+
+
+            ServerName = binReader.ReadString();
+
+
+            bool passwordRequired = binReader.ReadBoolean();
+            if (passwordRequired)
+            {
+                binWriter.Write(pass);
+                string responsePass = binReader.ReadString();
+                if (responsePass.Equals("INVALID_PASSWORD"))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("INVALID PASSWORD");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    return new DotUserException("INVALID PASSWORD");
+                }
+            }
 
 
             binWriter.Write(ID);
@@ -148,9 +183,22 @@ namespace DotNETWork.Tcp
                 Console.ForegroundColor = ConsoleColor.Gray;
             }
 
+            specialClient.Connect(new IPEndPoint(RemoteEndPoint.Address.MapToIPv4(), RemoteEndPoint.Port + 1));
+            specialReader = new BinaryReader(new NetworkStream(specialClient));
+
+            OnConnected?.Invoke();
+            IsConnected = true;
+
+            Task.Run(() =>
+            {
+                while (IsConnected)
+                {
+                    string s = specialReader.ReadString();
+                    OperationRunning = !s.Equals("READY");
+                }
+            });
 
 
-            OnConnected();
             return null;
         }
 
@@ -160,22 +208,23 @@ namespace DotNETWork.Tcp
             verificationHash = hash;
         }
 
-        public Exception Send(object inputData)
+        public void Send(object inputData)
         {
-            try
+            Task.Run(() =>
             {
-                var byteBuffer = inputData.SerializeToByteArray();
-                //binWriter.Write(byteBuffer.Length);
-                //binWriter.Write(byteBuffer);
-                var encryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
-                binWriter.Write(encryptedBuffer.Length);
-                binWriter.Write(encryptedBuffer);
-                return null;
-            }
-            catch
-            {
-                return new DotTcpException("NO CONNECTION");
-            }
+                lock (SYNC)
+                {
+                    while (OperationRunning) { }
+
+                    OperationRunning = true;
+                    var byteBuffer = inputData.SerializeToByteArray();
+                    var encryptedBuffer = rjindaelEncryption.EncryptStream(byteBuffer);
+                    binWriter.Write(encryptedBuffer.Length);
+                    binWriter.Write(encryptedBuffer);
+                }
+
+            });
+
         }
 
         public Exception SendDirect(object inputData, string toUser)
@@ -217,6 +266,7 @@ namespace DotNETWork.Tcp
                 return new DotTcpException("NO CONNECTION");
             }
         }
+        // Blue
 
         public async Task<bool> SendAsync(object inputData)
         {
@@ -274,6 +324,16 @@ namespace DotNETWork.Tcp
                     }
                 }
 
+                if(data is string)
+                {
+                    string s = (string)data;
+                    if(s.Equals("CONNECTION_CLOSED"))
+                    {
+                        IsConnected = false;
+                        return null;
+                    }
+                }
+
                 return data;
             }
             catch
@@ -300,6 +360,11 @@ namespace DotNETWork.Tcp
                     return false;
                 }
             });
+        }
+
+        public void Close()
+        {
+            socketClient.Close();
         }
 
 

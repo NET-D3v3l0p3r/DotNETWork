@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -9,6 +11,7 @@ using System.Runtime.Serialization.Formatters.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using DotNETWork.Tcp;
 
 namespace DotNETWork.Globals
 {
@@ -26,6 +29,12 @@ namespace DotNETWork.Globals
                 return ipEndP;
             }
             catch { return null; }
+        }
+        public static bool GetAvaiblity(this Socket socket, EndPoint ipep, int timeout)
+        {
+            var result = socket.BeginConnect(ipep, null, null);
+            var status = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(timeout));
+            return status;
         }
 
         public static byte[] SerializeToByteArray(this object objectData)
@@ -48,6 +57,7 @@ namespace DotNETWork.Globals
                 return ReturnValue;
             }
         }
+
         public static List<byte[]> StackByteArray(this byte[] inputArray, int stackSize)
         {
             List<byte[]> _packets = new List<byte[]>();
@@ -70,6 +80,7 @@ namespace DotNETWork.Globals
             }
             return _packets;
         }
+
         public static string ToMD5(this string stringData)
         {
             //Prüfen ob Daten übergeben wurden.
@@ -94,6 +105,53 @@ namespace DotNETWork.Globals
                 result.Append(bytes[i].ToString(upperCase ? "X2" : "x2"));
 
             return result.ToString();
+        }
+
+        public static Bitmap CompressImage(this Image sourceImage, int imageQuality)
+        {
+            try
+            {
+                //Create an ImageCodecInfo-object for the codec information
+                ImageCodecInfo jpegCodec = null;
+
+                //Set quality factor for compression
+                EncoderParameter imageQualitysParameter = new EncoderParameter(
+                            System.Drawing.Imaging.Encoder.Quality, imageQuality);
+
+                //List all avaible codecs (system wide)
+                ImageCodecInfo[] alleCodecs = ImageCodecInfo.GetImageEncoders();
+
+                EncoderParameters codecParameter = new EncoderParameters(1);
+                codecParameter.Param[0] = imageQualitysParameter;
+
+                //Find and choose JPEG codec
+                for (int i = 0; i < alleCodecs.Length; i++)
+                {
+                    if (alleCodecs[i].MimeType == "image/jpeg")
+                    {
+                        jpegCodec = alleCodecs[i];
+                        break;
+                    }
+                }
+
+                //Save compressed image
+                MemoryStream ms = new MemoryStream();
+                sourceImage.Save(ms, jpegCodec, codecParameter);
+
+                return new Bitmap(ms);
+            }
+            catch (Exception e)
+            {
+                throw e;
+            }
+        }
+
+        public static void WriteEncrypted(this BinaryWriter binWriter, object data, IClient client)
+        {
+            var encrypted = client.DotRijndaelEncryption.EncryptStream(data.SerializeToByteArray());
+
+            binWriter.Write(encrypted.Length);
+            binWriter.Write(encrypted);
         }
     }
 }

@@ -42,33 +42,17 @@ namespace DotNETWork.Udp.ACK
         ///  Important: Configure sendInterval -value (default: 20)
         /// </summary>
         /// <param name="_datagram"></param>
-        public void SendDatagram(object inputData, IPEndPoint remoteIp, int sendInterval,  bool showProgress = false)
+        public void SendDatagram(object inputData, IPEndPoint remoteIp, int sendInterval)
         {
             udpClient.Send(LocalEndPoint.SerializeToByteArray(), LocalEndPoint.SerializeToByteArray().Length, remoteIp);
             List<byte[]> bytePackets = inputData.SerializeToByteArray().StackByteArray(64000);
             udpClient.Send(bytePackets.Count.SerializeToByteArray(), bytePackets.Count.SerializeToByteArray().Length, remoteIp);
-            if (showProgress)
+
+            for (int i = 0; i < bytePackets.Count; i++)
             {
-                using (var progress = new ASCIIProgressbar())
-                {
-                    for (int i = 0; i < bytePackets.Count; i++)
-                    {
-                        udpClient.Send(BitConverter.GetBytes(i), BitConverter.GetBytes(i).Length, remoteIp);
-                        udpClient.Send(bytePackets[i], bytePackets[i].Length, remoteIp);
-                        progress.Report((double)i / bytePackets.Count);
-                        new System.Threading.ManualResetEvent(false).WaitOne(sendInterval);
-                    }
-                }
-                Console.WriteLine("Done.");
-            }
-            else
-            {
-                for (int i = 0; i < bytePackets.Count; i++)
-                {
-                    udpClient.Send(BitConverter.GetBytes(i), BitConverter.GetBytes(i).Length, remoteIp);
-                    udpClient.Send(bytePackets[i], bytePackets[i].Length, remoteIp);
-                    new System.Threading.ManualResetEvent(false).WaitOne(sendInterval);
-                }
+                udpClient.Send(BitConverter.GetBytes(i), BitConverter.GetBytes(i).Length, remoteIp);
+                udpClient.Send(bytePackets[i], bytePackets[i].Length, remoteIp);
+                new System.Threading.ManualResetEvent(false).WaitOne(sendInterval);
             }
         }
     }
