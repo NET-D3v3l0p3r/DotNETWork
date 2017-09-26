@@ -254,8 +254,15 @@ namespace DotNETWork.Tcp
 
             length = keyReader.ReadInt32();
             data = keyReader.ReadBytes(length);
-            data = _xmlDecryptor.DecryptStream(data);
-
+            try
+            {
+                data = _xmlDecryptor.DecryptStream(data);
+            }
+            catch
+            {
+                MessageBox.Show("Attention: MITM Attack highly possible." + Environment.NewLine + "Closing connection!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                return;
+            }
             Certificates = data.DeserializeToDynamicType();
 
             length = keyReader.ReadInt32();
