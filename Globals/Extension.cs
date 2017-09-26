@@ -156,10 +156,16 @@ namespace DotNETWork.Globals
 
         public static void WriteFull(this BinaryWriter binWriter, object data)
         {
-            var encrypted = data.SerializeToByteArray();
+            var buffer = data.SerializeToByteArray();
 
-            binWriter.Write(encrypted.Length);
-            binWriter.Write(encrypted);
+            binWriter.Write(buffer.Length);
+            binWriter.Write(buffer);
+        }
+
+        public static void WriteFull(this BinaryWriter binWriter, byte[] data)
+        {
+            binWriter.Write(data.Length);
+            binWriter.Write(data);
         }
     }
 }

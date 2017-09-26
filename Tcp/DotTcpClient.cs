@@ -213,7 +213,7 @@ namespace DotNETWork.Tcp
             return null;
         }
 
-        public void DownloadCertificates(IPEndPoint trustedHost, string path = null)
+        public void DownloadCertificates(IPEndPoint trustedHost, string verification, string path = null)
         {
             CertificateServerSample sample = null;
             if(path != null)
@@ -225,7 +225,7 @@ namespace DotNETWork.Tcp
             bool connectionStatus = asyncResult.AsyncWaitHandle.WaitOne(1000);
             if (!connectionStatus)
             {
-                MessageBox.Show("Attention: Key server seems offline", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                MessageBox.Show("Attention: Key server seems to be offline", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
                 return;
             }
 
@@ -233,14 +233,34 @@ namespace DotNETWork.Tcp
             keyClient.EndConnect(asyncResult);
 
             BinaryReader keyReader = new BinaryReader(new NetworkStream(keyClient));
+            BinaryWriter xmlWriter = new BinaryWriter(new NetworkStream(keyClient));
+
+            DotRijndaelDecryption _xmlDecryptor = new DotRijndaelDecryption("");
 
             int length = keyReader.ReadInt32();
             byte[] data = keyReader.ReadBytes(length);
+
+            string xml = data.DeserializeToDynamicType();
+            if(!Utilities.GetMD5Hash(xml).Equals(verification) && path == null)
+            {
+                MessageBox.Show("Attention: Key server is corrupt", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                return;
+            }
+            DotRijndaelEncryption _keyEncryptor = new DotRijndaelEncryption(xml);
+
+            byte[] toSend = _keyEncryptor.EncryptStream(_xmlDecryptor.GetPublicKeyXML().SerializeToByteArray());
+            xmlWriter.Write(toSend.Length);
+            xmlWriter.Write(toSend);
+
+            length = keyReader.ReadInt32();
+            data = keyReader.ReadBytes(length);
+            data = _xmlDecryptor.DecryptStream(data);
 
             Certificates = data.DeserializeToDynamicType();
 
             length = keyReader.ReadInt32();
             data = keyReader.ReadBytes(length);
+            data = _xmlDecryptor.DecryptStream(data);
 
             if (data.DeserializeToDynamicType() != "OK")
             {

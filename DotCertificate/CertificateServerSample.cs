@@ -26,7 +26,6 @@ namespace DotNETWork.DotCertificate
         public List<Certificate> Certificates { get; private set; }
 
         public IPEndPoint IPEndPoint { get; private set; }
-        public bool Enabled { get; set; }
 
         public CertificateServerSample(string path, int port)
         {
@@ -47,25 +46,41 @@ namespace DotNETWork.DotCertificate
 
             new Thread(new ThreadStart(() =>
             {
-                Enabled = true;
                 listener.Listen(int.MaxValue);
 
+                DotRijndaelDecryption _xmlDecryptor = new DotRijndaelDecryption("");
+                string xml = _xmlDecryptor.GetPublicKeyXML();
+                Clipboard.SetText(Utilities.GetMD5Hash(xml));
+
                 Console.WriteLine("Certificate-Server listening!");
-                while (Enabled)
+                while (true)
                 {
                     Socket client = listener.Accept();
+
                     BinaryWriter binWriter = new BinaryWriter(new NetworkStream(client));
+                    BinaryReader xmlReader = new BinaryReader(new NetworkStream(client));
 
-                    
-                    binWriter.WriteFull(Certificates);
-                    binWriter.WriteFull("OK");
+                    binWriter.WriteFull(xml);
+                    try
+                    {
+                        int lenght = xmlReader.ReadInt32();
+                        byte[] data = _xmlDecryptor.DecryptStream(xmlReader.ReadBytes(lenght));
+                        string clientXml = data.DeserializeToDynamicType();
 
-                    Console.WriteLine("Done.");
+                        DotRijndaelEncryption _keyEncryptor = new DotRijndaelEncryption(clientXml);
 
+
+                        binWriter.WriteFull(_keyEncryptor.EncryptStream(Certificates.SerializeToByteArray()));
+                        binWriter.WriteFull(_keyEncryptor.EncryptStream("OK".SerializeToByteArray()));
+
+                        Console.WriteLine("Done.");
+                    }
+                    catch { Console.WriteLine("Invalid."); }
                 }
-                
 
-            })).Start();
+
+            }))
+            { ApartmentState = ApartmentState.STA }.Start();
             
         }
     }
