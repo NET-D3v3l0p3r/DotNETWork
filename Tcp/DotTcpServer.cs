@@ -61,6 +61,11 @@ namespace DotNETWork.Tcp
             Keyset = encryptionString;
 
             RijndaelDecryption = new DotRijndaelDecryption(Keyset);
+            RijndaelDecryption.ExportCertificate(name, "Certificate_" + name);
+            MessageBox.Show(
+@"Certificate saved in application directory.
+Send it to an certificate-server administrator to verify Your identiy!", "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
             Signature = Utilities.GetMD5Hash(RijndaelDecryption.GetPublicKeyXML());
 
             Console.ForegroundColor = ConsoleColor.Green;
@@ -77,7 +82,7 @@ namespace DotNETWork.Tcp
             Clipboard.SetText(Signature);
         }
 
-        public void StartSession(string pass)
+        public void StartSession(string path_to_certificate, string pass)
         {
             IsActive = true;
             Password = pass;
@@ -104,7 +109,7 @@ namespace DotNETWork.Tcp
                         };
 
                         #region "Send verification"
-                        RijndaelDecryption.SendPublicKeyXML(inClient.BinWriter);
+                        RijndaelDecryption.SendCertificate(path_to_certificate, inClient.BinWriter);
                         try
                         {
                             int publicKeyLength = inClient.BinReader.ReadInt32();
@@ -114,7 +119,7 @@ namespace DotNETWork.Tcp
                         catch (Exception ex)
                         {
                             Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine("[*] INVALID HASH!");
+                            Console.WriteLine("[*] INVALID CERTIFICAE!");
                             Console.ForegroundColor = ConsoleColor.Gray;
                             isInvalid = true;
                         }

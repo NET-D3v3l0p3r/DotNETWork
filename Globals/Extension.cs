@@ -153,5 +153,13 @@ namespace DotNETWork.Globals
             binWriter.Write(encrypted.Length);
             binWriter.Write(encrypted);
         }
+
+        public static void WriteFull(this BinaryWriter binWriter, object data)
+        {
+            var encrypted = data.SerializeToByteArray();
+
+            binWriter.Write(encrypted.Length);
+            binWriter.Write(encrypted);
+        }
     }
 }

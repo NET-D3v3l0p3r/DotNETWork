@@ -15,6 +15,7 @@ using System.IO;
 using DotNETWork.Globals;
 using DotNETWork.Security;
 using System.Windows.Forms;
+using DotNETWork.DotCertificate;
 
 namespace DotNETWork.Tcp
 {
@@ -36,13 +37,15 @@ namespace DotNETWork.Tcp
         public bool DirectConnectionAllowed { get; private set; }
         public Dictionary<string, string> UserKeyPair { get; private set; }
 
+        public Certificate ServerCertificate { get; private set; }
+        public List<Certificate> Certificates { get; private set; }
+
         public bool OperationRunning { get; private set; }
 
         private Socket specialClient;
         private Socket socketClient;
 
         private BinaryReader specialReader;
-        private Thread dequeueThread;
 
         private BinaryReader binReader;
         private BinaryWriter binWriter;
@@ -50,7 +53,7 @@ namespace DotNETWork.Tcp
         private DotRijndaelEncryption rjindaelEncryption;
         private DotRijndaelDecryption rijndaelDecryption;
 
-        private string verificationHash = "";
+        
 
         private static object SYNC = new object();
 
@@ -61,6 +64,7 @@ namespace DotNETWork.Tcp
             ID = username;
 
             UserKeyPair = new Dictionary<string, string>();
+            Certificates = new List<Certificate>();
         }
 
 
@@ -72,8 +76,6 @@ namespace DotNETWork.Tcp
         /// <returns></returns>
         public Exception StartSession(int ms, string pass, bool verify = true)
         {
-            if (string.IsNullOrWhiteSpace(verificationHash))
-                return new Exception("An verification hash must be set!");
 
             specialClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
@@ -100,26 +102,35 @@ namespace DotNETWork.Tcp
             int dataLength = binReader.ReadInt32();
             receivedDataDecrypted = binReader.ReadBytes(dataLength);
 
-            string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
+            //string inputXML = receivedDataDecrypted.DeserializeToDynamicType();
+
+            ServerCertificate = receivedDataDecrypted.DeserializeToDynamicType();
+
             // VERIFY PUBLIC KEY HTML
 
-            if (verify && !verificationHash.Equals(Utilities.GetMD5Hash(inputXML)))
+            if (verify)
             {
-                MessageBox.Show("Attention: The hash of the received Public-Key-XML is not equivalent to the verification hash:" + Environment.NewLine +
-                    "Verification hash: " + verificationHash + Environment.NewLine +
-                    "Received hash: " + Utilities.GetMD5Hash(inputXML) + Environment.NewLine +
-                    "The XML is probably corrupt which is common in MITM-Attacks." + Environment.NewLine +
-                    "The connection will be closed immadiatly!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                bool _found = false;
+                foreach (var certificate in Certificates)
+                    _found = certificate.Equals(ServerCertificate);
 
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[*]CONNECTION LOST DUE CORRUPT KEY EXCEPTION!");
-                socketClient.Close();
-                binReader.Close();
-                binWriter.Close();
-                return new DotTcpException("CORRUPT KEY EXCEPTION");
+                if (!_found)
+                {
+                    MessageBox.Show("Attention: The connection is not trusted:" + Environment.NewLine +
+                           "Unknown certificate." + Environment.NewLine +
+                           "The connection will be closed immadiatly!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("[*]CONNECTION LOST DUE CORRUPT KEY EXCEPTION!");
+                    socketClient.Close();
+                    binReader.Close();
+                    binWriter.Close();
+                    return new DotTcpException("CORRUPT KEY EXCEPTION");
+                }
             }
+            
 
-            rjindaelEncryption = new DotRijndaelEncryption(inputXML);
+            rjindaelEncryption = new DotRijndaelEncryption(ServerCertificate.PublicKey);
 
             // SEND OWN CREATED PUBLIC KEY
             // TO SERVER.
@@ -202,10 +213,42 @@ namespace DotNETWork.Tcp
             return null;
         }
 
-
-        public void SetVerificationHash(string hash)
+        public void DownloadCertificates(IPEndPoint trustedHost, string path = null)
         {
-            verificationHash = hash;
+            CertificateServerSample sample = null;
+            if(path != null)
+                sample = new CertificateServerSample(path, trustedHost.Port);
+
+            
+            Socket keyClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            IAsyncResult asyncResult = keyClient.BeginConnect(trustedHost.Address.MapToIPv4(), trustedHost.Port, null, null);
+            bool connectionStatus = asyncResult.AsyncWaitHandle.WaitOne(1000);
+            if (!connectionStatus)
+            {
+                MessageBox.Show("Attention: Key server seems offline", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                return;
+            }
+
+
+            keyClient.EndConnect(asyncResult);
+
+            BinaryReader keyReader = new BinaryReader(new NetworkStream(keyClient));
+
+            int length = keyReader.ReadInt32();
+            byte[] data = keyReader.ReadBytes(length);
+
+            Certificates = data.DeserializeToDynamicType();
+
+            length = keyReader.ReadInt32();
+            data = keyReader.ReadBytes(length);
+
+            if (data.DeserializeToDynamicType() != "OK")
+            {
+                MessageBox.Show("Attention: FATAL ERROR!!!", "Warning!", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly, false);
+                return;
+            }
+ 
+            MessageBox.Show("Done loading " + Certificates.Count + " certificates.");
         }
 
         public void Send(object inputData)

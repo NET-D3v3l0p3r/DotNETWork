@@ -55,9 +55,11 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DotCertificate\CertificateServerSample.cs" />
     <Compile Include="DotTcpException.cs" />
     <Compile Include="Globals\ASCIIProgressbar.cs" />
     <Compile Include="Globals\Extension.cs" />
+    <Compile Include="DotCertificate\Certificate.cs" />
     <Compile Include="Security\DotRijndaelDecryption.cs" />
     <Compile Include="Security\DotRijndaelEncryption.cs" />
     <Compile Include="Tcp\IClient.cs" />
@@ -74,6 +76,7 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Tcp\Web\" />
+    <Folder Include="Udp\ACK\P2P\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

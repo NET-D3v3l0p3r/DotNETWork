@@ -8,6 +8,8 @@ using System.IO;
 using System.Security.Cryptography;
 
 using DotNETWork.Globals;
+using DotNETWork.DotCertificate;
+
 namespace DotNETWork.Security
 {
     public class DotRijndaelDecryption
@@ -18,11 +20,20 @@ namespace DotNETWork.Security
         public DotRijndaelDecryption(string keyString)
         {
             // Generate private key
-           
+
             cspParameters.KeyContainerName = keyString;
-            
+
             rsacProvider = new RSACryptoServiceProvider(cspParameters);
             rsacProvider.PersistKeyInCsp = true;
+
+        }
+
+        public void SendCertificate(string path, BinaryWriter binWriter)
+        {
+            byte[] buffer = File.ReadAllBytes(path);
+            binWriter.Write(buffer.Length);
+            binWriter.Write(buffer);
+             
         }
 
         public void SendPublicKeyXML(BinaryWriter binWriter)
@@ -36,6 +47,22 @@ namespace DotNETWork.Security
         public string GetPublicKeyXML()
         {
             return rsacProvider.ToXmlString(false);
+        }
+
+        public Certificate ToCertificate(string owner)
+        {
+            string xml = GetPublicKeyXML();
+            return new Certificate()
+            {
+                Owner = owner,
+                PublicKey = xml,
+                Id = Utilities.GetMD5Hash(xml)
+            };
+        }
+
+        public void ExportCertificate(string owner, string path)
+        {
+            File.WriteAllBytes(path, ToCertificate(owner).SerializeToByteArray());
         }
 
         public byte[] DecryptStream(byte[] inputArray)
